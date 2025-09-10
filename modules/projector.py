@@ -9,12 +9,14 @@ class Projector(nn.Module):
 			out_channels: int,
 			inner_mul_size: int = 4,
 			zero_last_layer: bool = False,
+			dropout: float = 0.0,
 	):
 		super().__init__()
 
 		self.net = nn.Sequential(
 			nn.Conv2d(in_channels=in_channels, out_channels=inner_mul_size * out_channels, kernel_size=1),
 			nn.SiLU(),
+			nn.Dropout(dropout),
 			nn.Conv2d(in_channels=inner_mul_size * out_channels, out_channels=out_channels, kernel_size=1)
 		)
 

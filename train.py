@@ -41,25 +41,27 @@ test_data = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False)
 
 # ======================================================================================================================
 device = "cuda" if torch.cuda.is_available() else "cpu"
+print(f"Cuda is available: {torch.cuda.is_available()}")
 
 from modules.s2ir import SIIR
+from modules.count_params import count_parameters
 
 model = SIIR(
 	c_channels=1,
 	d_channels=64,
 	num_heads=4,
-	num_blocks=6,
-	t_dim=128,
+	num_blocks=4,
+	t_dim=16,
 	text_embed_dim=10,
 	pos_embed_dim=2,
+	dropout_p_ffw=0.33,
+	dropout_p_axial=0.15,
+	dropout_p_cross=0.15,
 ).to(device)
 
-from save_load_model import load_checkpoint_into
+count_parameters(model)
 
-model = load_checkpoint_into(model, "models/s2ir_20250909_205256.pt", "cuda")
-model.to(device)
-
-optimizer = torch.optim.Adam(params=model.parameters(), lr=1e-6)
+optimizer = torch.optim.AdamW(params=model.parameters(), lr=1e-4)
 
 # ======================================================================================================================
 from tqdm import tqdm
@@ -69,7 +71,7 @@ from modules.relative_positional_conditioning import relative_positional_conditi
 from modules.render_image import render_image
 from modules.global_embed import global_embed
 
-num_epochs = 20
+num_epochs = 10
 train_losses = []
 test_losses = []
 
@@ -116,7 +118,7 @@ for E in range(num_epochs):
 			test_loss += loss.item()
 			# print(loss.item())
 
-			if i == 50:
+			if i == 0:
 				fixed_noisy = torch.clamp(((noisy_image + 1) / 2), min=0.0, max=1.0)
 				fixed_predicted = torch.clamp(((predicted_noise + 1) / 2), min=0.0, max=1.0)
 				fixed_expected = torch.clamp(((expected_output + 1) / 2), min=0.0, max=1.0)

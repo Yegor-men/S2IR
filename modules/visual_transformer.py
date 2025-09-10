@@ -28,13 +28,12 @@ class VisualTransformerBlock(nn.Module):
 		self.film2 = FiLM(t_dim=t_dim, d_channels=d_channels)
 		self.cross_norm = nn.GroupNorm(num_heads, d_channels)
 		self.cross_attention = CrossAttention(d_channels=d_channels, num_heads=num_heads)
-		self.axial_dropout = nn.Dropout(dropout_p_cross)
+		self.cross_dropout = nn.Dropout(dropout_p_cross)
 		self.cross_scalar = nn.Parameter(torch.ones(d_channels) * 1e-4)
 
 		self.norm3 = nn.GroupNorm(1, d_channels)
 		self.film3 = FiLM(t_dim=t_dim, d_channels=d_channels)
-		self.ffw = Projector(in_channels=d_channels, out_channels=d_channels, inner_mul_size=4)
-		self.axial_dropout = nn.Dropout(dropout_p_ffw)
+		self.ffw = Projector(in_channels=d_channels, out_channels=d_channels, inner_mul_size=4, dropout=dropout_p_ffw)
 		self.ffw_scalar = nn.Parameter(torch.ones(d_channels) * 1e-4)
 
 	def forward(self, image_latent, guidance, time_vector):
@@ -52,14 +51,13 @@ class VisualTransformerBlock(nn.Module):
 		x2_mod = self.film2(x2_norm, time_vector)
 		x2_mod_norm = self.cross_norm(x2_mod)
 		cross_delta = self.cross_attention(x2_mod_norm, guidance)
-		cross_delta = self.axial_dropout(cross_delta)
+		cross_delta = self.cross_dropout(cross_delta)
 		cross_scale = self.cross_scalar.view(1, D, 1, 1)
 		image_latent = image_latent + cross_delta * cross_scale
 
 		x3_norm = self.norm3(image_latent)
 		x3_mod = self.film3(x3_norm, time_vector)
 		ffw_delta = self.ffw(x3_mod)
-		ffw_delta = self.axial_dropout(ffw_delta)
 		ffw_scale = self.ffw_scalar.view(1, D, 1, 1)
 		image_latent = image_latent + ffw_delta * ffw_scale
 
