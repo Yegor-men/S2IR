@@ -26,7 +26,7 @@ model = SIIR(
 
 from save_load_model import load_checkpoint_into
 
-model = load_checkpoint_into(model, "models/s2ir_20250910_180408.pt", "cuda")
+model = load_checkpoint_into(model, "models/gauss_noise_pred.pt", "cuda")
 model.to(device)
 model.eval()
 
