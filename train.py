@@ -48,20 +48,45 @@ from modules.count_params import count_parameters
 
 model = SIIR(
 	c_channels=1,
-	d_channels=64,
+	d_channels=128,
 	num_heads=4,
-	num_blocks=4,
-	t_dim=16,
+	num_blocks=6,
+	t_dim=128,
 	text_embed_dim=10,
 	pos_embed_dim=2,
-	dropout_p_ffw=0.33,
-	dropout_p_axial=0.15,
-	dropout_p_cross=0.15,
+	dropout_p_ffw=0.2,
+	dropout_p_axial=0.1,
+	dropout_p_cross=0.1,
 ).to(device)
+
+import copy
+
+ema_decay = 0.99
+
+
+def get_ema_decay(step, target_decay):
+	warmup_steps = int(1 / (1 - ema_decay))
+	if step < warmup_steps:
+		return step / warmup_steps
+	else:
+		return target_decay
+
+
+ema_model = copy.deepcopy(model)
+ema_model.eval()
+for param in ema_model.parameters():
+	param.requires_grad = False
+
+
+@torch.no_grad()
+def update_ema_model(model, ema_model, decay):
+	for param, ema_param in zip(model.parameters(), ema_model.parameters()):
+		ema_param.data.mul_(decay).add_(param.data, alpha=1 - decay)
+
 
 count_parameters(model)
 
-optimizer = torch.optim.AdamW(params=model.parameters(), lr=1e-4)
+optimizer = torch.optim.AdamW(params=model.parameters(), lr=1e-3)
 
 # ======================================================================================================================
 from tqdm import tqdm
@@ -74,6 +99,7 @@ from modules.global_embed import global_embed
 num_epochs = 10
 train_losses = []
 test_losses = []
+t = 0
 
 for E in range(num_epochs):
 	model.train()
@@ -90,10 +116,13 @@ for E in range(num_epochs):
 			text_cond = global_embed(labels, h, w) * cfg_mask
 			pos_cond = relative_positional_conditioning(image).to(device)
 
-		predicted_noise = model(noisy_image, text_cond, pos_cond, alpha_bar)
-		loss = nn.functional.mse_loss(predicted_noise, expected_output)
+		predicted = model(noisy_image, text_cond, pos_cond, alpha_bar)
+		loss = nn.functional.mse_loss(predicted, expected_output)
 		loss.backward()
 		optimizer.step()
+		t += 1
+		decay = get_ema_decay(t, ema_decay)
+		update_ema_model(model, ema_model, ema_decay)
 		train_loss += loss.item()
 
 	train_loss /= len(train_data)
@@ -113,20 +142,19 @@ for E in range(num_epochs):
 			text_cond = global_embed(labels, h, w) * cfg_mask
 			pos_cond = relative_positional_conditioning(image).to(device)
 
-			predicted_noise = model(noisy_image, text_cond, pos_cond, alpha_bar)
-			loss = nn.functional.mse_loss(predicted_noise, expected_output)
+			predicted = ema_model(noisy_image, text_cond, pos_cond, alpha_bar)
+			loss = nn.functional.mse_loss(predicted, expected_output)
 			test_loss += loss.item()
-			# print(loss.item())
 
 			if i == 0:
 				fixed_noisy = torch.clamp(((noisy_image + 1) / 2), min=0.0, max=1.0)
-				fixed_predicted = torch.clamp(((predicted_noise + 1) / 2), min=0.0, max=1.0)
+				fixed_predicted = torch.clamp(((predicted + 1) / 2), min=0.0, max=1.0)
 				fixed_expected = torch.clamp(((expected_output + 1) / 2), min=0.0, max=1.0)
 
 				render_image(fixed_noisy, title=f"E{E} - Noisy Image")
 				render_image(fixed_predicted, title=f"E{E} - Predicted")
 				render_image(fixed_expected, title=f"E{E} - Expected")
-				render_image((predicted_noise - expected_output) ** 2, title=f"E{E} - Squared Error")
+				render_image((predicted - expected_output) ** 2, title=f"E{E} - Squared Error")
 
 		test_loss /= len(test_data)
 		test_losses.append(test_loss)
