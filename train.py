@@ -59,9 +59,15 @@ model = SIIR(
 	dropout_p_cross=0.1,
 ).to(device)
 
+from save_load_model import load_checkpoint_into
+
+model = load_checkpoint_into(model, "models/ema_05758_gauss_noise.pt", "cuda")
+model.to(device)
+model.eval()
+
 import copy
 
-ema_decay = 0.99
+ema_decay = 0.999
 
 
 def get_ema_decay(step, target_decay):
@@ -86,7 +92,7 @@ def update_ema_model(model, ema_model, decay):
 
 count_parameters(model)
 
-optimizer = torch.optim.AdamW(params=model.parameters(), lr=1e-3)
+optimizer = torch.optim.AdamW(params=model.parameters(), lr=0.0001)
 
 # ======================================================================================================================
 from tqdm import tqdm
@@ -96,7 +102,7 @@ from modules.relative_positional_conditioning import relative_positional_conditi
 from modules.render_image import render_image
 from modules.global_embed import global_embed
 
-num_epochs = 10
+num_epochs = 20
 train_losses = []
 test_losses = []
 t = 0
@@ -168,4 +174,4 @@ for E in range(num_epochs):
 # ======================================================================================================================
 from save_load_model import save_checkpoint
 
-model_path = save_checkpoint(model)
+model_path = save_checkpoint(ema_model)

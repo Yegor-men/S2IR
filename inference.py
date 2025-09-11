@@ -5,7 +5,7 @@ from modules.relative_positional_conditioning import relative_positional_conditi
 from modules.global_embed import global_embed
 from modules.render_image import render_image
 
-B, C, H, W = 9, 1, 28, 28
+B, C, H, W = 16, 1, 28, 28
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -13,25 +13,25 @@ from modules.s2ir import SIIR
 
 model = SIIR(
 	c_channels=1,
-	d_channels=64,
+	d_channels=128,
 	num_heads=4,
-	num_blocks=4,
-	t_dim=16,
+	num_blocks=6,
+	t_dim=128,
 	text_embed_dim=10,
 	pos_embed_dim=2,
-	dropout_p_ffw=0.33,
-	dropout_p_axial=0.15,
-	dropout_p_cross=0.15,
+	dropout_p_ffw=0.2,
+	dropout_p_axial=0.1,
+	dropout_p_cross=0.1,
 )
 
 from save_load_model import load_checkpoint_into
 
-model = load_checkpoint_into(model, "models/gauss_noise_pred.pt", "cuda")
+model = load_checkpoint_into(model, "models/ema_05688_gauss_noise.pt", "cuda")
 model.to(device)
 model.eval()
 
 label = torch.zeros(10)
-label[0] = 1.0
+label[1] = 1.0
 labels = label.unsqueeze(0).expand(B, -1).to(device)
 
 initial_noise = torch.randn(B, C, H, W)
@@ -155,10 +155,10 @@ final_x0_hat, final_x = run_ddim_visualization(
 	position_conditioning=position_conditioning,
 	alpha_bar_fn=alpha_bar_cosine,
 	render_image_fn=render_image,
-	num_steps=50,
-	cfg_scale=1.0,  # safe
-	eta=0.0,
+	num_steps=100,
+	cfg_scale=1.5,  # safe
+	eta=0.5,
 	render_every=1,
-	start_t=0.95,  # explicit safe start
+	start_t=0.99,  # explicit safe start
 	device=torch.device("cuda")
 )
