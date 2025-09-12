@@ -4,7 +4,7 @@ from modules.alpha_bar import alpha_bar_cosine
 from modules.global_embed import global_embed
 from modules.render_image import render_image
 
-B, C, H, W = 16, 1, 28, 28
+B, C, H, W = 100, 1, 28, 28
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -25,18 +25,20 @@ model = SIIR(
 
 from save_load_model import load_checkpoint_into
 
-model = load_checkpoint_into(model, "models/s2ir_05_separate_weights.pt", "cuda")
+model = load_checkpoint_into(model, "models/s2ir_04179.pt", "cuda")
 model.to(device)
 model.eval()
 
-label = torch.zeros(10)
-label[1] = 1.0
-labels = label.unsqueeze(0).expand(B, -1).to(device)
-foo = torch.rand_like(labels).round()
-labels = labels * foo
+positive_text_conditioning = torch.zeros(100, 10, H, W).to(device)
+
+for i in range(10):
+	one_hot = torch.zeros(10).to(device)
+	one_hot[i] = 1.0
+	one_hot_expanded = one_hot.view(1, 10, 1, 1).expand(10, 10, H, W)
+	positive_text_conditioning[i * 10: (i + 1) * 10] = one_hot_expanded
 
 initial_noise = torch.randn(B, C, H, W)
-positive_text_conditioning = global_embed(labels, H, W).to(device)
+# positive_text_conditioning = global_embed(labels, H, W).to(device)
 zero_text_conditioning = torch.zeros_like(positive_text_conditioning).to(device)
 render_image((initial_noise + 1) / 2)
 # ======================================================================================================================
@@ -153,9 +155,9 @@ final_x0_hat, final_x = run_ddim_visualization(
 	alpha_bar_fn=alpha_bar_cosine,
 	render_image_fn=render_image,
 	num_steps=50,
-	cfg_scale=1.0,  # safe
+	cfg_scale=3.0,  # safe
 	eta=1.0,
 	render_every=1,
-	start_t=0.95,  # explicit safe start
+	start_t=0.99,  # explicit safe start
 	device=torch.device("cuda")
 )

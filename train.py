@@ -60,15 +60,15 @@ model = SIIR(
 	ffn_dropout=0.2,
 ).to(device)
 
-# from save_load_model import load_checkpoint_into
-#
-# model = load_checkpoint_into(model, "models/s2ir_05_separate_weights.pt", "cuda")
-# model.to(device)
-# model.eval()
+from save_load_model import load_checkpoint_into
+
+model = load_checkpoint_into(model, "models/s2ir_04655.pt", "cuda")
+model.to(device)
+model.eval()
 
 import copy
 
-ema_decay = 0.9975
+ema_decay = 0.999
 
 
 def get_ema_decay(step, target_decay):
@@ -93,7 +93,7 @@ def update_ema_model(model, ema_model, decay):
 
 count_parameters(model)
 
-optimizer = torch.optim.AdamW(params=model.parameters(), lr=0.0005)
+optimizer = torch.optim.AdamW(params=model.parameters(), lr=0.0001)
 
 # ======================================================================================================================
 from tqdm import tqdm
@@ -102,7 +102,7 @@ from modules.corrupt_image import corrupt_image
 from modules.render_image import render_image
 from modules.global_embed import global_embed
 
-num_epochs = 20
+num_epochs = 60
 train_losses = []
 test_losses = []
 t = 0
