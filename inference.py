@@ -1,7 +1,6 @@
 # ======================================================================================================================
 import torch
 from modules.alpha_bar import alpha_bar_cosine
-from modules.position_embedding import relative_positional_conditioning
 from modules.global_embed import global_embed
 from modules.render_image import render_image
 
@@ -39,7 +38,6 @@ labels = labels * foo
 initial_noise = torch.randn(B, C, H, W)
 positive_text_conditioning = global_embed(labels, H, W).to(device)
 zero_text_conditioning = torch.zeros_like(positive_text_conditioning).to(device)
-position_conditioning = relative_positional_conditioning(initial_noise).to(device)
 render_image((initial_noise + 1) / 2)
 # ======================================================================================================================
 import torch
@@ -53,7 +51,6 @@ def run_ddim_visualization(
 		initial_noise: torch.Tensor,
 		positive_text_conditioning: torch.Tensor,
 		zero_text_conditioning: torch.Tensor,
-		position_conditioning: torch.Tensor,
 		alpha_bar_fn,
 		render_image_fn=None,
 		num_steps: int = 50,
@@ -69,7 +66,6 @@ def run_ddim_visualization(
 
 	x = initial_noise.to(device)
 	B, C, H, W = x.shape
-	pos_cond = position_conditioning.to(device)
 	cond = positive_text_conditioning.to(device)
 	uncond = zero_text_conditioning.to(device)
 
@@ -154,7 +150,6 @@ final_x0_hat, final_x = run_ddim_visualization(
 	initial_noise=initial_noise,
 	positive_text_conditioning=positive_text_conditioning,
 	zero_text_conditioning=zero_text_conditioning,
-	position_conditioning=position_conditioning,
 	alpha_bar_fn=alpha_bar_cosine,
 	render_image_fn=render_image,
 	num_steps=50,
