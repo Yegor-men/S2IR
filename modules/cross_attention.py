@@ -23,12 +23,3 @@ class CrossAttention(nn.Module):
 		attn_out = attn_out.view(B, H, W, D).permute(0, 3, 1, 2).contiguous()
 
 		return attn_out
-
-
-class CrossAdd(nn.Module):
-	def __init__(self, d_channels):
-		super().__init__()
-		self.guidance_proj = nn.Conv2d(d_channels, d_channels, kernel_size=1)
-
-	def forward(self, image, guidance):
-		return image + self.guidance_proj(guidance)

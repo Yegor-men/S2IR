@@ -6,8 +6,8 @@ import math
 class ContinuousTimeEmbed(nn.Module):
 	def __init__(
 			self,
-			t_dim: int = 128,
-			num_frequencies: int = 64,
+			time_dim: int = 64,
+			num_frequencies: int = 32,
 			max_period: float = 10000.0
 	):
 		super().__init__()
@@ -18,9 +18,9 @@ class ContinuousTimeEmbed(nn.Module):
 		self.register_buffer("frequencies", frequencies * 2 * math.pi, persistent=False)
 
 		self.mlp = nn.Sequential(
-			nn.Linear(num_frequencies * 2, t_dim),
+			nn.Linear(num_frequencies * 2, time_dim),
 			nn.SiLU(),
-			nn.Linear(t_dim, t_dim),
+			nn.Linear(time_dim, time_dim),
 		)
 
 	def forward(self, alpha_bar: torch.Tensor) -> torch.Tensor:

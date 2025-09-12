@@ -2,8 +2,7 @@ import torch
 from torch import nn
 from .film import FiLM
 from .axial_attention import AxialAttention
-from .cross_attention import CrossAttention, CrossAdd
-from .projector import Projector
+from .cross_attention import CrossAttention
 
 
 class VisualTransformerBlock(nn.Module):
@@ -11,54 +10,63 @@ class VisualTransformerBlock(nn.Module):
 			self,
 			d_channels: int,
 			num_heads: int,
-			t_dim: int,
-			dropout_p_axial: float = 0.0,
-			dropout_p_cross: float = 0.0,
-			dropout_p_ffw: float = 0.0,
+			time_dim: int,
+			text_cond_dim: int,
+			pos_cond_dim: int,
+			cond_dropout: float = 0.0,
+			axial_dropout: float = 0.0,
+			ffn_dropout: float = 0.0,
 	):
 		super().__init__()
-		self.norm1 = nn.GroupNorm(1, d_channels)
-		self.film1 = FiLM(t_dim=t_dim, d_channels=d_channels)
-		self.axial_norm = nn.GroupNorm(num_heads, d_channels)
-		self.axial_attention = AxialAttention(d_channels=d_channels, num_heads=num_heads)
-		self.axial_dropout = nn.Dropout(dropout_p_axial)
-		self.axial_scalar = nn.Parameter(torch.ones(d_channels) * 1e-4)
+		self.d_channels = d_channels
 
-		self.norm2 = nn.GroupNorm(1, d_channels)
-		self.film2 = FiLM(t_dim=t_dim, d_channels=d_channels)
-		self.cross_norm = nn.GroupNorm(num_heads, d_channels)
-		self.cross_attention = CrossAttention(d_channels=d_channels, num_heads=num_heads)
-		self.cross_dropout = nn.Dropout(dropout_p_cross)
-		self.cross_scalar = nn.Parameter(torch.ones(d_channels) * 1e-4)
+		self.image_norm = nn.GroupNorm(1, d_channels)
 
-		self.norm3 = nn.GroupNorm(1, d_channels)
-		self.film3 = FiLM(t_dim=t_dim, d_channels=d_channels)
-		self.ffw = Projector(in_channels=d_channels, out_channels=d_channels, inner_mul_size=4, dropout=dropout_p_ffw)
-		self.ffw_scalar = nn.Parameter(torch.ones(d_channels) * 1e-4)
+		self.text_film = FiLM(time_dim=time_dim, num_channels=text_cond_dim)
+		self.cross_add_text = nn.Conv2d(text_cond_dim, d_channels, 1)
+		self.text_dropout = nn.Dropout2d(cond_dropout)
 
-	def forward(self, image_latent, guidance, time_vector):
-		B, D, H, W = image_latent.shape
+		self.pos_film = FiLM(time_dim=time_dim, num_channels=pos_cond_dim)
+		self.cross_add_pos = nn.Conv2d(pos_cond_dim, d_channels, 1)
+		self.pos_dropout = nn.Dropout2d(cond_dropout)
 
-		x1_norm = self.norm1(image_latent)
-		x1_mod = self.film1(x1_norm, time_vector)
-		x1_mod_norm = self.axial_norm(x1_mod)
-		axial_delta = self.axial_attention(x1_mod_norm)
-		axial_delta = self.axial_dropout(axial_delta)
-		axial_scale = self.axial_scalar.view(1, D, 1, 1)
-		image_latent = image_latent + axial_delta * axial_scale
+		self.axial_film = FiLM(time_dim=time_dim, num_channels=d_channels)
+		self.axial_attn = AxialAttention(d_channels=d_channels, num_heads=num_heads, dropout=axial_dropout)
+		self.axial_scalar = nn.Parameter(torch.full((d_channels,), -6.0))
 
-		x2_norm = self.norm2(image_latent)
-		x2_mod = self.film2(x2_norm, time_vector)
-		x2_mod_norm = self.cross_norm(x2_mod)
-		cross_delta = self.cross_attention(x2_mod_norm, guidance)
-		cross_delta = self.cross_dropout(cross_delta)
-		cross_scale = self.cross_scalar.view(1, D, 1, 1)
-		image_latent = image_latent + cross_delta * cross_scale
+		self.ffn_film = FiLM(time_dim=time_dim, num_channels=d_channels)
+		self.ffn = nn.Sequential(
+			nn.Conv2d(d_channels, 4 * d_channels, 1),
+			nn.SiLU(),
+			nn.Dropout(ffn_dropout),
+			nn.Conv2d(4 * d_channels, d_channels, 1),
+		)
+		self.ffn_scalar = nn.Parameter(torch.full((d_channels,), -6.0))
 
-		x3_norm = self.norm3(image_latent)
-		x3_mod = self.film3(x3_norm, time_vector)
-		ffw_delta = self.ffw(x3_mod)
-		ffw_scale = self.ffw_scalar.view(1, D, 1, 1)
-		image_latent = image_latent + ffw_delta * ffw_scale
+		self.final_scalar = nn.Parameter(torch.full((d_channels,), -6.0))
 
-		return image_latent
+	def forward(self, image_tensor, text_cond, pos_cond, time_tensor):
+		normalized_image = self.image_norm(image_tensor)
+
+		filmed_text = self.text_film(text_cond, time_tensor)
+		filmed_pos = self.pos_film(pos_cond, time_tensor)
+		text_conditioning = self.cross_add_text(filmed_text)
+		pos_conditioning = self.cross_add_pos(filmed_pos)
+		text_conditioning = self.text_dropout(text_conditioning)
+		pos_conditioning = self.pos_dropout(pos_conditioning)
+		conditioned_image = normalized_image + text_conditioning + pos_conditioning
+
+		filmed_axial = self.axial_film(conditioned_image, time_tensor)
+		axial_delta = self.axial_attn(filmed_axial)
+		axial_scalar = nn.functional.sigmoid(self.axial_scalar).view(1, self.d_channels, 1, 1)
+		attended_image = conditioned_image * (1 - axial_scalar) + axial_delta * axial_scalar
+
+		filmed_ffn = self.ffn_film(attended_image, time_tensor)
+		ffn_delta = self.ffn(filmed_ffn)
+		ffn_scalar = nn.functional.sigmoid(self.ffn_scalar).view(1, self.d_channels, 1, 1)
+		modified_image = attended_image * (1 - ffn_scalar) + ffn_delta * ffn_scalar
+
+		final_scalar = nn.functional.sigmoid(self.final_scalar).view(1, self.d_channels, 1, 1)
+		final_image = image_tensor * (1 - final_scalar) + modified_image * final_scalar
+
+		return final_image

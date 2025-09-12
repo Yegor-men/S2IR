@@ -1,7 +1,7 @@
 # ======================================================================================================================
 import torch
 from modules.alpha_bar import alpha_bar_cosine
-from modules.relative_positional_conditioning import relative_positional_conditioning
+from modules.position_embedding import relative_positional_conditioning
 from modules.global_embed import global_embed
 from modules.render_image import render_image
 
@@ -16,23 +16,25 @@ model = SIIR(
 	d_channels=128,
 	num_heads=4,
 	num_blocks=6,
-	t_dim=128,
-	text_embed_dim=10,
-	pos_embed_dim=2,
-	dropout_p_ffw=0.2,
-	dropout_p_axial=0.1,
-	dropout_p_cross=0.1,
+	time_dim=64,
+	text_cond_dim=10,
+	pos_cond_dim=64,
+	cond_dropout=0.1,
+	axial_dropout=0.05,
+	ffn_dropout=0.2,
 )
 
 from save_load_model import load_checkpoint_into
 
-model = load_checkpoint_into(model, "models/ema_05688_gauss_noise.pt", "cuda")
+model = load_checkpoint_into(model, "models/s2ir_05_separate_weights.pt", "cuda")
 model.to(device)
 model.eval()
 
 label = torch.zeros(10)
 label[1] = 1.0
 labels = label.unsqueeze(0).expand(B, -1).to(device)
+foo = torch.rand_like(labels).round()
+labels = labels * foo
 
 initial_noise = torch.randn(B, C, H, W)
 positive_text_conditioning = global_embed(labels, H, W).to(device)
@@ -98,8 +100,8 @@ def run_ddim_visualization(
 		a_s = alpha_bar_fn(s_batch).to(device).clamp(min=eps_small)
 
 		# model outputs (classifier-free guidance: uncond + cond)
-		eps_uncond = model(x, uncond, pos_cond, a_t)  # shape [B,C,H,W]
-		eps_cond = model(x, cond, pos_cond, a_t)
+		eps_uncond = model(x, uncond, a_t)  # shape [B,C,H,W]
+		eps_cond = model(x, cond, a_t)
 		eps_hat = eps_uncond + cfg_scale * (eps_cond - eps_uncond)
 
 		# compute x0_hat stably
@@ -155,10 +157,10 @@ final_x0_hat, final_x = run_ddim_visualization(
 	position_conditioning=position_conditioning,
 	alpha_bar_fn=alpha_bar_cosine,
 	render_image_fn=render_image,
-	num_steps=100,
-	cfg_scale=1.5,  # safe
-	eta=0.5,
+	num_steps=50,
+	cfg_scale=1.0,  # safe
+	eta=1.0,
 	render_every=1,
-	start_t=0.99,  # explicit safe start
+	start_t=0.95,  # explicit safe start
 	device=torch.device("cuda")
 )

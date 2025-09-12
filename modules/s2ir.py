@@ -1,11 +1,9 @@
 import torch
 from torch import nn
 
-from .encoder import Encoder
-from .decoder import Decoder
 from .visual_transformer import VisualTransformerBlock
 from .time_embedding import ContinuousTimeEmbed
-from .projector import Projector
+from .position_embedding import RelPosEmbed
 
 
 class SIIR(nn.Module):
@@ -15,44 +13,48 @@ class SIIR(nn.Module):
 			d_channels: int,
 			num_heads: int,
 			num_blocks: int,
-			t_dim: int,
-			text_embed_dim: int,
-			pos_embed_dim: int,
-			dropout_p_axial: float = 0.0,
-			dropout_p_cross: float = 0.0,
-			dropout_p_ffw: float = 0.0,
+			time_dim: int,
+			text_cond_dim: int,
+			pos_cond_dim: int,
+			cond_dropout: float = 0.0,
+			axial_dropout: float = 0.0,
+			ffn_dropout: float = 0.0,
 	):
 		super().__init__()
-		self.enc = Encoder(c_channels, d_channels)
-		self.dec = Decoder(c_channels, d_channels)
 
-		self.text_expander = Projector(in_channels=text_embed_dim, out_channels=d_channels)
-		self.pos_expander = Projector(in_channels=pos_embed_dim, out_channels=d_channels)
+		self.image_encoder = nn.Conv2d(c_channels, d_channels, 1)
+		self.time_embed = ContinuousTimeEmbed(time_dim=time_dim, num_frequencies=time_dim // 2)
+		self.pos_embed = RelPosEmbed(pos_dim=pos_cond_dim, num_frequencies=pos_cond_dim // 2)
 
 		self.blocks = nn.ModuleList([VisualTransformerBlock(
 			d_channels=d_channels,
 			num_heads=num_heads,
-			t_dim=t_dim,
-			dropout_p_axial=dropout_p_axial,
-			dropout_p_cross=dropout_p_cross,
-			dropout_p_ffw=dropout_p_ffw,
+			time_dim=time_dim,
+			text_cond_dim=text_cond_dim,
+			pos_cond_dim=pos_cond_dim,
+			cond_dropout=cond_dropout,
+			axial_dropout=axial_dropout,
+			ffn_dropout=ffn_dropout,
 		) for _ in range(num_blocks)
 		])
 
-		self.time_embed = ContinuousTimeEmbed(t_dim=t_dim, num_frequencies=t_dim // 2)
+		self.image_decoder = nn.Sequential(
+			nn.Conv2d(d_channels, 2 * d_channels, 1),
+			nn.SiLU(),
+			nn.Conv2d(2 * d_channels, c_channels, 1),
+		)
 
-	def forward(self, image_tensor, text_cond, pos_cond, alpha_bar):
-		time_vector = self.time_embed(alpha_bar)
+	def forward(self, image_tensor, text_cond, alpha_bar):
+		b, c, h, w = image_tensor.shape
 
-		text_projection = self.text_expander(text_cond)
-		pos_projection = self.pos_expander(pos_cond)
-		guidance = text_projection + pos_projection
+		image_latent = self.image_encoder(image_tensor)
+		time_tensor = self.time_embed(alpha_bar)
 
-		image_latent = self.enc(image_tensor)
+		pos_cond = self.pos_embed(b, h, w)
 
 		for index, block in enumerate(self.blocks):
-			image_latent = block(image_latent, guidance, time_vector)
+			image_latent = block(image_latent, text_cond, pos_cond, time_tensor)
 
-		predicted_noise = self.dec(image_latent)
+		predicted_noise = self.image_decoder(image_latent)
 
 		return predicted_noise
