@@ -1,3 +1,4 @@
+# continuous_time_embed.py
 import torch
 from torch import nn
 import math
@@ -7,30 +8,33 @@ class ContinuousTimeEmbed(nn.Module):
 	def __init__(
 			self,
 			time_dim: int = 64,
-			num_frequencies: int = 32,
-			max_period: float = 10000.0
+			num_frequencies: int = 16,
+			eps: float = 1e-6
 	):
 		super().__init__()
+		self.time_dim = int(time_dim)
+		self.num_frequencies = int(num_frequencies)
+		self.eps = float(eps)
 
-		frequencies = torch.exp(
-			torch.linspace(0, math.log(max_period), num_frequencies)
-		)
-		self.register_buffer("frequencies", frequencies * 2 * math.pi, persistent=False)
+		base = 2.0 * math.pi
+		powers = torch.arange(self.num_frequencies, dtype=torch.float32)
+		frequencies = base * (2.0 ** powers)
+		self.register_buffer("frequencies", frequencies, persistent=True)
 
 		self.mlp = nn.Sequential(
-			nn.Linear(num_frequencies * 2, time_dim),
+			nn.Linear(self.num_frequencies * 2, self.time_dim),
 			nn.SiLU(),
-			nn.Linear(time_dim, time_dim),
+			nn.Linear(self.time_dim, self.time_dim),
 		)
 
 	def forward(self, alpha_bar: torch.Tensor) -> torch.Tensor:
-		B = alpha_bar.shape[0]
+		alpha_mapped = alpha_bar * (0.5 - 2 * self.eps) - (0.25 - self.eps)
+		# Now it's between [-0.5 + eps, 0.5 - eps]
 
-		t_proj = alpha_bar.unsqueeze(1) * self.frequencies
-		sin_feat = torch.sin(t_proj)
-		cos_feat = torch.cos(t_proj)
+		tproj = alpha_mapped.unsqueeze(1) * self.frequencies.view(1, -1)
+		sin_feat = torch.sin(tproj)
+		cos_feat = torch.cos(tproj)
 		feat = torch.cat([sin_feat, cos_feat], dim=-1)
 
-		t_emb = self.mlp(feat)
-
-		return t_emb
+		out = self.mlp(feat)
+		return out

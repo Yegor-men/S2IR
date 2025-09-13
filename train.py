@@ -6,12 +6,9 @@ import numpy as np
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 
-BATCH_SIZE = 100
-NUM_CLASSES = 10
 
-
-def one_hot_encode(label, num_classes=NUM_CLASSES):
-	return torch.nn.functional.one_hot(torch.tensor(label), num_classes=num_classes).float()
+def one_hot_encode(label):
+	return torch.nn.functional.one_hot(torch.tensor(label), num_classes=10).float()
 
 
 class OneHotMNIST(torch.utils.data.Dataset):
@@ -36,10 +33,6 @@ class OneHotMNIST(torch.utils.data.Dataset):
 
 train_dataset = OneHotMNIST(train=True)
 test_dataset = OneHotMNIST(train=False)
-
-train_data = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
-test_data = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False)
-
 # ======================================================================================================================
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Cuda is available: {torch.cuda.is_available()}")
@@ -52,32 +45,23 @@ model = SIIR(
 	d_channels=128,
 	num_heads=4,
 	num_blocks=6,
+	time_freq=10,
 	time_dim=64,
+	pos_freq=6,
+	pos_dim=64,
 	text_cond_dim=10,
-	pos_cond_dim=64,
-	cond_dropout=0.1,
-	axial_dropout=0.05,
-	ffn_dropout=0.2,
+	cond_dropout=0.0,
+	axial_dropout=0.0,
+	ffn_dropout=0.0,
 ).to(device)
 
-from save_load_model import load_checkpoint_into
-
-model = load_checkpoint_into(model, "models/s2ir_04655.pt", "cuda")
-model.to(device)
-model.eval()
+# from save_load_model import load_checkpoint_into
+#
+# model = load_checkpoint_into(model, "s2ir_14_09_25_04901.pt", "cuda")
+# model.to(device)
+# model.eval()
 
 import copy
-
-ema_decay = 0.999
-
-
-def get_ema_decay(step, target_decay):
-	warmup_steps = int(1 / (1 - ema_decay))
-	if step < warmup_steps:
-		return step / warmup_steps
-	else:
-		return target_decay
-
 
 ema_model = copy.deepcopy(model)
 ema_model.eval()
@@ -93,58 +77,66 @@ def update_ema_model(model, ema_model, decay):
 
 count_parameters(model)
 
-optimizer = torch.optim.AdamW(params=model.parameters(), lr=0.0001)
+optimizer = torch.optim.AdamW(params=model.parameters(), lr=1e-3)
 
 # ======================================================================================================================
+num_epochs = 20
+batch_size = 100
+ema_decay = 0.999
+
+train_data = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+test_data = DataLoader(test_dataset, batch_size=batch_size, shuffle=True)
+
 from tqdm import tqdm
 from modules.alpha_bar import alpha_bar_cosine
 from modules.corrupt_image import corrupt_image
 from modules.render_image import render_image
 from modules.global_embed import global_embed
 
-num_epochs = 60
 train_losses = []
 test_losses = []
-t = 0
+percentile_losses = []
 
 for E in range(num_epochs):
-	model.train()
+
 	train_loss = 0
+	model.train()
+
 	for i, (image, label) in tqdm(enumerate(train_data), total=len(train_data), leave=True, desc=f"E: {E}"):
-		optimizer.zero_grad()
-		image, labels = (image * 2.0 - 1.0).to(device), label.to(device)
 		b, c, h, w = image.shape
+
 		with torch.no_grad():
-			times = torch.rand(b).to(device)
-			alpha_bar = alpha_bar_cosine(times)
+			image, label = (image * 2.0 - 1.0).to(device), label
+			alpha_bar = alpha_bar_cosine(torch.rand(b)).to(device)
 			noisy_image, expected_output = corrupt_image(image, alpha_bar)
-			cfg_mask = torch.rand(b).round().view(b, 1, 1, 1).to(device)
-			text_cond = global_embed(labels, h, w) * cfg_mask
+			cfg_mask = torch.rand(b).round().view(b, 1, 1, 1)
+			text_cond = (global_embed(label, h, w) * cfg_mask).to(device)
 
 		predicted = model(noisy_image, text_cond, alpha_bar)
 		loss = nn.functional.mse_loss(predicted, expected_output)
 		loss.backward()
-		optimizer.step()
-		t += 1
-		decay = get_ema_decay(t, ema_decay)
-		update_ema_model(model, ema_model, ema_decay)
 		train_loss += loss.item()
+		optimizer.step()
+		optimizer.zero_grad()
+		cur_batch = E * len(train_data) + i
+		decay = ema_decay if cur_batch > 1 / (1 - ema_decay) else cur_batch / (1 / (1 - ema_decay))
+		update_ema_model(model, ema_model, ema_decay)
 
 	train_loss /= len(train_data)
 	train_losses.append(train_loss)
 
-	model.eval()
 	test_loss = 0
+	model.eval()
+
 	with torch.no_grad():
 		for i, (image, label) in tqdm(enumerate(test_data), total=len(test_data), leave=True, desc=f"T: {E}"):
-			image, labels = (image * 2.0 - 1.0).to(device), label.to(device)
 			b, c, h, w = image.shape
 
-			times = torch.rand(b).to(device)
-			alpha_bar = alpha_bar_cosine(times)
+			image, label = (image * 2.0 - 1.0).to(device), label
+			alpha_bar = alpha_bar_cosine(torch.rand(b)).to(device)
 			noisy_image, expected_output = corrupt_image(image, alpha_bar)
-			cfg_mask = torch.rand(b).round().view(b, 1, 1, 1).to(device)
-			text_cond = global_embed(labels, h, w) * cfg_mask
+			cfg_mask = torch.rand(b).round().view(b, 1, 1, 1)
+			text_cond = (global_embed(label, h, w) * cfg_mask).to(device)
 
 			predicted = ema_model(noisy_image, text_cond, alpha_bar)
 			loss = nn.functional.mse_loss(predicted, expected_output)
@@ -167,6 +159,7 @@ for E in range(num_epochs):
 	plt.plot(test_losses, label="test")
 	plt.legend()
 	plt.show()
+
 	print(f"\nEpoch {E} - TRAIN: {train_loss:.5f}, TEST: {test_loss:.5f}")
 
 	with torch.no_grad():
@@ -175,17 +168,17 @@ for E in range(num_epochs):
 
 		for t in t_range:
 			image, label = next(iter(train_data))
-			image, label = (image * 2.0 - 1.0).to(device), label.to(device)
 			b, c, h, w = image.shape
+			image, label = (image * 2.0 - 1.0).to(device), label
 
-			time_vector = torch.full((b,), t).to(device)
-			alpha_bar = alpha_bar_cosine(time_vector)
+			alpha_bar = alpha_bar_cosine(torch.ones(b) * t).to(device)
 			noisy_image, expected_output = corrupt_image(image, alpha_bar)
-			cfg_mask = torch.rand(b).round().view(b, 1, 1, 1).to(device)
-			text_cond = global_embed(label, h, w) * cfg_mask
+			cfg_mask = torch.rand(b).round().view(b, 1, 1, 1)
+			text_cond = (global_embed(label, h, w) * cfg_mask).to(device)
 
 			predicted = ema_model(noisy_image, text_cond, alpha_bar)
 			loss = nn.functional.mse_loss(predicted, expected_output)
+
 			t_scrape_losses.append(loss.item())
 
 	x = np.linspace(0, 1, len(t_scrape_losses))
@@ -198,6 +191,14 @@ for E in range(num_epochs):
 		plt.scatter(px, py, color='red')
 		plt.text(px, py, f'{py}', fontsize=9, ha='center', va='bottom')
 	plt.title('T scrape Losses')
+	plt.show()
+
+	percentile_losses.append(percentile_y)
+	transposed = list(zip(*percentile_losses))
+	for i, series in enumerate(transposed):
+		plt.plot(series, label=f"t = {(percentiles[i] / 100):.2f}")
+	plt.title("T scrape percentile losses over time")
+	plt.legend()
 	plt.show()
 
 # ======================================================================================================================

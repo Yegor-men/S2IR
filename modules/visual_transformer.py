@@ -2,7 +2,6 @@ import torch
 from torch import nn
 from .film import FiLM
 from .axial_attention import AxialAttention
-from .cross_attention import CrossAttention
 
 
 class VisualTransformerBlock(nn.Module):
