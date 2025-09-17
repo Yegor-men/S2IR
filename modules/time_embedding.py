@@ -16,19 +16,18 @@ class ContinuousTimeEmbed(nn.Module):
 		self.num_frequencies = int(num_frequencies)
 		self.eps = float(eps)
 
-		base = 2.0 * math.pi
 		powers = torch.arange(self.num_frequencies, dtype=torch.float32)
-		frequencies = base * (2.0 ** powers)
+		frequencies = math.pi * (2.0 ** powers)  # [pi, 2pi, 4pi, ...]
 		self.register_buffer("frequencies", frequencies, persistent=True)
 
 		self.mlp = nn.Sequential(
-			nn.Linear(self.num_frequencies * 2, self.time_dim),
+			nn.Linear(2 * self.num_frequencies, 2 * self.time_dim),
 			nn.SiLU(),
-			nn.Linear(self.time_dim, self.time_dim),
+			nn.Linear(2 * self.time_dim, self.time_dim),
 		)
 
 	def forward(self, alpha_bar: torch.Tensor) -> torch.Tensor:
-		alpha_mapped = alpha_bar * (0.5 - 2 * self.eps) - (0.25 - self.eps)
+		alpha_mapped = alpha_bar * (1 - 2 * self.eps) - (0.5 - self.eps)
 		# Now it's between [-0.5 + eps, 0.5 - eps]
 
 		tproj = alpha_mapped.unsqueeze(1) * self.frequencies.view(1, -1)

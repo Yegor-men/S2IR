@@ -11,6 +11,7 @@ class AxialAttention(nn.Module):
 	):
 		super().__init__()
 		assert d_channels % num_heads == 0
+
 		self.row_mha = nn.MultiheadAttention(
 			embed_dim=d_channels,
 			num_heads=num_heads,
@@ -24,19 +25,19 @@ class AxialAttention(nn.Module):
 			dropout=dropout,
 		)
 
-		self.row_norm = nn.GroupNorm(num_heads, d_channels)
-		self.col_norm = nn.GroupNorm(num_heads, d_channels)
+	# self.row_norm = nn.GroupNorm(num_heads, d_channels)
+	# self.col_norm = nn.GroupNorm(num_heads, d_channels)
 
 	def forward(self, x):
 		B, D, H, W = x.shape
 
-		x_row = self.row_norm(x)
-		x_row = x_row.permute(0, 2, 3, 1).contiguous().view(B * H, W, D)
+		# x_row = self.row_norm(x)
+		x_row = x.permute(0, 2, 3, 1).contiguous().view(B * H, W, D)
 		attn_row_out, _ = self.row_mha(x_row, x_row, x_row, need_weights=False)
 		attn_row_out = attn_row_out.view(B, H, W, D).permute(0, 3, 1, 2).contiguous()
 
-		x_col = self.col_norm(x)
-		x_col = x_col.permute(0, 3, 2, 1).contiguous().view(B * W, H, D)
+		# x_col = self.col_norm(x)
+		x_col = x.permute(0, 3, 2, 1).contiguous().view(B * W, H, D)
 		attn_col_out, _ = self.col_mha(x_col, x_col, x_col, need_weights=False)
 		attn_col_out = attn_col_out.view(B, W, H, D).permute(0, 3, 2, 1).contiguous()
 

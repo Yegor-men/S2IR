@@ -54,7 +54,7 @@ model = SIIR(
 	num_blocks=6,
 	time_dim=64,
 	text_cond_dim=10,
-	pos_cond_dim=64,
+	pos_dim=64,
 	cond_dropout=0.1,
 	axial_dropout=0.05,
 	ffn_dropout=0.2,
@@ -62,28 +62,29 @@ model = SIIR(
 
 from save_load_model import load_checkpoint_into
 
-model = load_checkpoint_into(model, "models/s2ir_05_separate_weights.pt", "cuda")
+model = load_checkpoint_into(model, "models/s2ir_04179.pt", "cuda")
 model.to(device)
 model.eval()
 
 # ======================================================================================================================
 from modules.alpha_bar import alpha_bar_cosine
 from modules.corrupt_image import corrupt_image
-from modules.global_embed import global_embed
-from modules.render_image import render_image
 from tqdm import tqdm
+import numpy as np
 
-max_num = 1000
+max_num = 100
 
 losses = []
 
 with torch.no_grad():
-	for i in tqdm(range(max_num), total=max_num, leave=True, desc=f"Iterating over t"):
+	t_range = torch.linspace(0, 1, steps=max_num)
+	t_scrape_losses = []
+
+	for _, t in tqdm(enumerate(t_range), total=max_num):
 		image, label = next(iter(train_data))
 		image, label = (image * 2.0 - 1.0).to(device), label.to(device)
 		b, c, h, w = image.shape
 
-		t = i / max_num
 		time_vector = torch.full((b,), t).to(device)
 		alpha_bar = alpha_bar_cosine(time_vector)
 		noisy_image, expected_output = corrupt_image(image, alpha_bar)
@@ -92,17 +93,21 @@ with torch.no_grad():
 
 		predicted = model(noisy_image, text_cond, alpha_bar)
 		loss = nn.functional.mse_loss(predicted, expected_output)
-		losses.append(loss.item())
+		t_scrape_losses.append(loss.item())
 
-		if i in {0, 100, 200, 300, 400, 500, 600, 700, 800, 900, 999}:
-			print(f"loss.item(): {loss.item()}")
-			fixed_noisy = torch.clamp(((noisy_image + 1) / 2), min=0.0, max=1.0)
-			fixed_predicted = torch.clamp(((predicted + 1) / 2), min=0.0, max=1.0)
-			fixed_expected = torch.clamp(((expected_output + 1) / 2), min=0.0, max=1.0)
+x = np.linspace(0, 1, len(t_scrape_losses))
+plt.plot(x, t_scrape_losses)
+percentiles = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
+indices = [int(p / 100 * (len(t_scrape_losses) - 1)) for p in percentiles]
+percentile_x = [x[i] for i in indices]
+percentile_y = [t_scrape_losses[i] for i in indices]
+for px, py, p in zip(percentile_x, percentile_y, percentiles):
+	plt.scatter(px, py, color='red')
+	plt.text(px, py, f'{py}', fontsize=9, ha='center', va='bottom')
+plt.title('T scrape Losses')
 
-			render_image(fixed_noisy, title=f"T{t} - Noisy Image")
-			render_image(fixed_predicted, title=f"T{t} - Predicted")
-			render_image(fixed_expected, title=f"T{t} - Expected")
+for i, v in enumerate(percentile_y):
+	print(f"t = {percentiles[i] / 100}, loss = {v:.6f}")
 
 plt.plot(losses)
 plt.show()

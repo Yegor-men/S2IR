@@ -7,8 +7,8 @@ from torch import nn
 class RelPosEmbed2D(nn.Module):
 	def __init__(
 			self,
-			pos_dim: int = 64,
 			num_frequencies: int = 16,
+			pos_dim: int = 64,
 			eps: float = 1e-6
 	):
 		super().__init__()
@@ -16,29 +16,30 @@ class RelPosEmbed2D(nn.Module):
 		self.num_frequencies = int(num_frequencies)
 		self.eps = float(eps)
 
-		base = 2.0 * math.pi
-		powers = torch.arange(self.num_frequencies, dtype=torch.float32)
-		freqs = base * (2.0 ** powers)
+		powers = torch.arange(self.num_frequencies, dtype=torch.float32)  # [0, 1, ...]
+		freqs = math.pi * (2.0 ** powers)  # [pi, 2pi, 4pi, ...]
 		self.register_buffer("frequencies", freqs, persistent=True)
 
 		in_ch = 4 * self.num_frequencies
 		hidden = max(self.pos_dim, in_ch)
 
+		self.decay = nn.Parameter(torch.zeros(1))
+
 		self.proj = nn.Sequential(
-			nn.Conv2d(in_channels=in_ch, out_channels=hidden, kernel_size=1),
+			nn.Conv2d(in_channels=in_ch, out_channels=2 * hidden, kernel_size=1),
 			nn.SiLU(),
-			nn.Conv2d(in_channels=hidden, out_channels=self.pos_dim, kernel_size=1),
+			nn.Conv2d(in_channels=2 * hidden, out_channels=pos_dim, kernel_size=1),
 		)
 
 	def _make_grid(self, h: int, w: int):
 		if w >= h:
-			x_min, x_max = -0.25, 0.25
+			x_min, x_max = -0.5, 0.5
 			y_extent = h / w
-			y_min, y_max = -0.25 * y_extent, 0.25 * y_extent
+			y_min, y_max = -0.5 * y_extent, 0.5 * y_extent
 		else:
-			y_min, y_max = -0.25, 0.25
+			y_min, y_max = -0.5, 0.5
 			x_extent = w / h
-			x_min, x_max = -0.25 * x_extent, 0.25 * x_extent
+			x_min, x_max = -0.5 * x_extent, 0.5 * x_extent
 
 		x_coords = torch.linspace(x_min + self.eps, x_max - self.eps, steps=w)
 		y_coords = torch.linspace(y_min + self.eps, y_max - self.eps, steps=h)
@@ -47,22 +48,34 @@ class RelPosEmbed2D(nn.Module):
 		grid = torch.stack([xx, yy], dim=0)
 		return grid
 
-	def forward(self, b: int, h: int, w: int) -> torch.Tensor:
-		grid = self._make_grid(h, w).to(self.frequencies)  # [2, H, W]
-		grid = grid.unsqueeze(0).expand(b, -1, -1, -1)  # [B, 2, H, W]
+	def forward(self, h: int, w: int) -> torch.Tensor:
+		grid = self._make_grid(h, w).to(self.frequencies)
 
-		# attach frequency axis [B, 2, H, W, 1] * [1, 1, 1, 1, F] -> [B,2,H,W,F]
-		grid_unsq = grid.unsqueeze(-1)  # [B,2,H,W,1]
-		freqs = self.frequencies.view(1, 1, 1, 1, -1)  # [1,1,1,1,F]
-		tproj = grid_unsq * freqs  # [B,2,H,W,F]
+		min_pixels = (2 ** torch.arange(self.num_frequencies))
+		useful_mask = (min_pixels <= min(h, w)).to(self.frequencies)
 
-		# sin/cos and pack -> [B, 4*num_frequencies, H, W]
-		sin_feat = torch.sin(tproj)  # [B,2,H,W,F]
-		cos_feat = torch.cos(tproj)
-		fourier = torch.cat([sin_feat, cos_feat], dim=-1)  # [B,2,H,W,2F]
+		base = torch.sigmoid(self.decay).clamp(min=1e-6)
+		powers = torch.arange(self.num_frequencies).to(self.frequencies)
+		decays = base ** powers
 
-		B, C2, H_, W_, F2 = fourier.shape  # C2==2, F2==2*num_frequencies
-		fourier_ch = fourier.permute(0, 1, 4, 2, 3).contiguous().view(B, C2 * F2, H_, W_)
+		weights = decays * useful_mask
 
-		out = self.proj(fourier_ch)  # [B, pos_dim, H, W]
+		grid_unsq = grid.unsqueeze(-1)  # [2, h, w, 1]
+		freqs = self.frequencies.view(1, 1, 1, -1)  # [1, 1, 1, F]
+		tproj = grid_unsq * freqs  # [2, h, w, F]
+
+		# sin/cos and multiply amplitude weights -> sin_feat/cos_feat [2, h, w, F]
+		# expand weights to broadcast: [1, 1, 1, F]
+		weights_view = weights.view(1, 1, 1, -1)
+		sin_feat = torch.sin(tproj) * weights_view
+		cos_feat = torch.cos(tproj) * weights_view
+
+		# now rearrange into channel-first format expected by conv: [1, 4F, h, w]
+		# sin_feat shape [2, h, w, F] -> permute -> [2, F, h, w] -> reshape [2F, h, w]
+		sin_ch = sin_feat.permute(0, 3, 1, 2).contiguous().view(2 * self.num_frequencies, h, w)
+		cos_ch = cos_feat.permute(0, 3, 1, 2).contiguous().view(2 * self.num_frequencies, h, w)
+		fourier_ch = torch.cat([sin_ch, cos_ch], dim=0).unsqueeze(0)  # [1, 4F, h, w]
+
+		out = self.proj(fourier_ch)  # [1, pos_dim, h, w]
+		out = out.squeeze(0)  # -> [pos_dim, h, w]
 		return out

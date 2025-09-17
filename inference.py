@@ -1,7 +1,6 @@
 # ======================================================================================================================
 import torch
 from modules.alpha_bar import alpha_bar_cosine
-from modules.global_embed import global_embed
 from modules.render_image import render_image
 
 B, C, H, W = 1, 1, 1024, 1024
@@ -12,35 +11,30 @@ from modules.s2ir import SIIR
 
 model = SIIR(
 	c_channels=1,
-	d_channels=128,
-	num_heads=4,
+	d_channels=64,
+	time_freq=7,
+	pos_freq=4,
 	num_blocks=6,
-	time_freq=10,
-	time_dim=64,
-	pos_freq=6,
-	pos_dim=64,
+	num_heads=4,
 	text_cond_dim=10,
-	cond_dropout=0.0,
-	axial_dropout=0.0,
-	ffn_dropout=0.0,
+	text_token_length=1,
+	cross_dropout=0.05,
+	axial_dropout=0.05,
+	ffn_dropout=0.1,
 )
 
 from save_load_model import load_checkpoint_into
 
-model = load_checkpoint_into(model, "models/E99_0.03520_20250914_064717.pt", "cuda")
+model = load_checkpoint_into(model, "models/E20_0.03743_20250917_185215.pt", "cuda")
 model.to(device)
 model.eval()
 
-# positive_text_conditioning = torch.zeros(100, 10, H, W).to(device)
+# positive_text_conditioning = torch.zeros(100, 10)
 # for i in range(10):
-# 	one_hot = torch.zeros(10).to(device)
-# 	one_hot[i] = 1.0
-# 	one_hot_expanded = one_hot.view(1, 10, 1, 1).expand(10, 10, H, W)
-# 	positive_text_conditioning[i * 10: (i + 1) * 10] = one_hot_expanded
+# 	positive_text_conditioning[i * 10:(i + 1) * 10, i] = 1.0
 
-labels = torch.zeros(B, 10)
-labels[:, 6] = 1.0
-positive_text_conditioning = global_embed(labels, H, W).to(device)
+positive_text_conditioning = torch.zeros(B, 10)
+positive_text_conditioning[:, 6] = 1.0
 
 initial_noise = torch.randn(B, C, H, W)
 zero_text_conditioning = torch.zeros_like(positive_text_conditioning).to(device)

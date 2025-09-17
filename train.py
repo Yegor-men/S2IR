@@ -2,6 +2,7 @@ import matplotlib.pyplot as plt
 import torch
 from torch import nn
 import numpy as np
+from save_load_model import save_checkpoint
 # ======================================================================================================================
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
@@ -42,24 +43,23 @@ from modules.count_params import count_parameters
 
 model = SIIR(
 	c_channels=1,
-	d_channels=128,
-	num_heads=4,
+	d_channels=64,
+	time_freq=7,
+	pos_freq=4,
 	num_blocks=6,
-	time_freq=10,
-	time_dim=64,
-	pos_freq=6,
-	pos_dim=64,
+	num_heads=4,
 	text_cond_dim=10,
-	cond_dropout=0.0,
-	axial_dropout=0.0,
-	ffn_dropout=0.0,
+	text_token_length=1,
+	cross_dropout=0.05,
+	axial_dropout=0.05,
+	ffn_dropout=0.1,
 ).to(device)
 
-# from save_load_model import load_checkpoint_into
-#
-# model = load_checkpoint_into(model, "s2ir_14_09_25_04901.pt", "cuda")
-# model.to(device)
-# model.eval()
+from save_load_model import load_checkpoint_into
+
+model = load_checkpoint_into(model, "models/E30_0.03676_20250917_193202.pt", "cuda")
+model.to(device)
+model.eval()
 
 import copy
 
@@ -80,8 +80,9 @@ count_parameters(model)
 optimizer = torch.optim.AdamW(params=model.parameters(), lr=1e-3)
 
 # ======================================================================================================================
-num_epochs = 20
+num_epochs = 40
 batch_size = 100
+minibatch_size = 5
 ema_decay = 0.999
 
 train_data = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
@@ -91,38 +92,50 @@ from tqdm import tqdm
 from modules.alpha_bar import alpha_bar_cosine
 from modules.corrupt_image import corrupt_image
 from modules.render_image import render_image
-from modules.global_embed import global_embed
 
 train_losses = []
 test_losses = []
 percentile_losses = []
 
+curr_minibatch = 0
+minibatch_loss = 0
+
 for E in range(num_epochs):
 
 	train_loss = 0
+	num_minibatches = 0
 	model.train()
 
 	for i, (image, label) in tqdm(enumerate(train_data), total=len(train_data), leave=True, desc=f"E: {E}"):
 		b, c, h, w = image.shape
+		if b != batch_size:
+			continue
 
 		with torch.no_grad():
 			image, label = (image * 2.0 - 1.0).to(device), label
 			alpha_bar = alpha_bar_cosine(torch.rand(b)).to(device)
 			noisy_image, expected_output = corrupt_image(image, alpha_bar)
-			cfg_mask = torch.rand(b).round().view(b, 1, 1, 1)
-			text_cond = (global_embed(label, h, w) * cfg_mask).to(device)
+			cfg_mask = torch.rand(b).round().unsqueeze(-1)
+			text_cond = (label * cfg_mask).to(device)
 
 		predicted = model(noisy_image, text_cond, alpha_bar)
 		loss = nn.functional.mse_loss(predicted, expected_output)
 		loss.backward()
-		train_loss += loss.item()
-		optimizer.step()
-		optimizer.zero_grad()
-		cur_batch = E * len(train_data) + i
-		decay = ema_decay if cur_batch > 1 / (1 - ema_decay) else cur_batch / (1 / (1 - ema_decay))
-		update_ema_model(model, ema_model, ema_decay)
+		minibatch_loss += loss.item()
+		curr_minibatch += 1
+		if curr_minibatch == minibatch_size:
+			train_loss += minibatch_loss / minibatch_size
+			num_minibatches += 1
+			curr_minibatch, minibatch_loss = 0, 0
+			with torch.no_grad():
+				for param in model.parameters():
+					param.grad.div_(minibatch_size)
+			optimizer.step()
+			optimizer.zero_grad()
 
-	train_loss /= len(train_data)
+			update_ema_model(model, ema_model, ema_decay)
+
+	train_loss /= num_minibatches
 	train_losses.append(train_loss)
 
 	test_loss = 0
@@ -135,8 +148,8 @@ for E in range(num_epochs):
 			image, label = (image * 2.0 - 1.0).to(device), label
 			alpha_bar = alpha_bar_cosine(torch.rand(b)).to(device)
 			noisy_image, expected_output = corrupt_image(image, alpha_bar)
-			cfg_mask = torch.rand(b).round().view(b, 1, 1, 1)
-			text_cond = (global_embed(label, h, w) * cfg_mask).to(device)
+			cfg_mask = torch.rand(b).round().unsqueeze(-1)
+			text_cond = (label * cfg_mask).to(device)
 
 			predicted = ema_model(noisy_image, text_cond, alpha_bar)
 			loss = nn.functional.mse_loss(predicted, expected_output)
@@ -173,8 +186,8 @@ for E in range(num_epochs):
 
 			alpha_bar = alpha_bar_cosine(torch.ones(b) * t).to(device)
 			noisy_image, expected_output = corrupt_image(image, alpha_bar)
-			cfg_mask = torch.rand(b).round().view(b, 1, 1, 1)
-			text_cond = (global_embed(label, h, w) * cfg_mask).to(device)
+			cfg_mask = torch.rand(b).round().unsqueeze(-1)
+			text_cond = (label * cfg_mask).to(device)
 
 			predicted = ema_model(noisy_image, text_cond, alpha_bar)
 			loss = nn.functional.mse_loss(predicted, expected_output)
@@ -201,7 +214,6 @@ for E in range(num_epochs):
 	plt.legend()
 	plt.show()
 
+	if (E + 1) % 10 == 0 or E == num_epochs:
+		model_path = save_checkpoint(ema_model, prefix=f"E{E + 1}_{test_loss:.5f}")
 # ======================================================================================================================
-from save_load_model import save_checkpoint
-
-model_path = save_checkpoint(ema_model)
