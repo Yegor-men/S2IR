@@ -3,7 +3,7 @@ import torch
 from modules.alpha_bar import alpha_bar_cosine
 from modules.render_image import render_image
 
-B, C, H, W = 1, 1, 1024, 1024
+B, C, H, W = 100, 1, 20, 20
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -11,30 +11,30 @@ from modules.s2ir import SIIR
 
 model = SIIR(
 	c_channels=1,
-	d_channels=64,
-	time_freq=7,
-	pos_freq=4,
-	num_blocks=6,
-	num_heads=4,
+	d_channels=32,
+	time_freq=8,
+	pos_freq=5,
+	num_blocks=8,
+	num_heads=2,
 	text_cond_dim=10,
 	text_token_length=1,
-	cross_dropout=0.05,
-	axial_dropout=0.05,
-	ffn_dropout=0.1,
+	cross_dropout=0.1,
+	axial_dropout=0.1,
+	ffn_dropout=0.2,
 )
 
 from save_load_model import load_checkpoint_into
 
-model = load_checkpoint_into(model, "models/E20_0.03743_20250917_185215.pt", "cuda")
+model = load_checkpoint_into(model, "models/E15_0.04342_0.034304369473829865_20250919_173958.pt", "cuda")
 model.to(device)
 model.eval()
 
-# positive_text_conditioning = torch.zeros(100, 10)
-# for i in range(10):
-# 	positive_text_conditioning[i * 10:(i + 1) * 10, i] = 1.0
+positive_text_conditioning = torch.zeros(100, 10)
+for i in range(10):
+	positive_text_conditioning[i * 10:(i + 1) * 10, i] = 1.0
 
-positive_text_conditioning = torch.zeros(B, 10)
-positive_text_conditioning[:, 6] = 1.0
+# positive_text_conditioning = torch.zeros(B, 10)
+# positive_text_conditioning[:, 6] = 1.0
 
 initial_noise = torch.randn(B, C, H, W)
 zero_text_conditioning = torch.zeros_like(positive_text_conditioning).to(device)
@@ -153,8 +153,8 @@ final_x0_hat, final_x = run_ddim_visualization(
 	alpha_bar_fn=alpha_bar_cosine,
 	render_image_fn=render_image,
 	num_steps=20,
-	cfg_scale=1.0,  # safe
-	eta=1.0,
+	cfg_scale=1.5,  # safe
+	eta=2.0,
 	render_every=1,
 	start_t=0.99,  # explicit safe start
 	device=torch.device("cuda")
