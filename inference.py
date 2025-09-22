@@ -3,7 +3,7 @@ import torch
 from modules.alpha_bar import alpha_bar_cosine
 from modules.render_image import render_image
 
-B, C, H, W = 100, 1, 20, 20
+B, C, H, W = 100, 1, 28, 28
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -14,18 +14,18 @@ model = SIIR(
 	d_channels=32,
 	time_freq=8,
 	pos_freq=5,
-	num_blocks=8,
+	num_blocks=6,
 	num_heads=2,
 	text_cond_dim=10,
 	text_token_length=1,
-	cross_dropout=0.1,
-	axial_dropout=0.1,
+	cross_dropout=0.05,
+	axial_dropout=0.05,
 	ffn_dropout=0.2,
 )
 
 from save_load_model import load_checkpoint_into
 
-model = load_checkpoint_into(model, "models/E15_0.04342_0.034304369473829865_20250919_173958.pt", "cuda")
+model = load_checkpoint_into(model, "models/bar.pt", "cuda")
 model.to(device)
 model.eval()
 
@@ -154,8 +154,8 @@ final_x0_hat, final_x = run_ddim_visualization(
 	render_image_fn=render_image,
 	num_steps=20,
 	cfg_scale=1.5,  # safe
-	eta=2.0,
+	eta=1.0,
 	render_every=1,
-	start_t=0.99,  # explicit safe start
+	start_t=0.999,  # explicit safe start
 	device=torch.device("cuda")
 )

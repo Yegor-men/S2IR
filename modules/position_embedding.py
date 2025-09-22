@@ -8,11 +8,11 @@ class RelPosEmbed2D(nn.Module):
 	def __init__(
 			self,
 			num_frequencies: int = 16,
-			pos_dim: int = 64,
+			d_channels: int = 64,
 			eps: float = 1e-6
 	):
 		super().__init__()
-		self.pos_dim = int(pos_dim)
+		self.pos_dim = int(d_channels)
 		self.num_frequencies = int(num_frequencies)
 		self.eps = float(eps)
 
@@ -21,14 +21,13 @@ class RelPosEmbed2D(nn.Module):
 		self.register_buffer("frequencies", freqs, persistent=True)
 
 		in_ch = 4 * self.num_frequencies
-		hidden = max(self.pos_dim, in_ch)
 
-		self.decay = nn.Parameter(torch.zeros(1))
+		# self.decay = nn.Parameter(torch.zeros(1))
 
 		self.proj = nn.Sequential(
-			nn.Conv2d(in_channels=in_ch, out_channels=2 * hidden, kernel_size=1),
-			nn.SiLU(),
-			nn.Conv2d(in_channels=2 * hidden, out_channels=pos_dim, kernel_size=1),
+			nn.GroupNorm(1, in_ch),
+			nn.Conv2d(in_channels=in_ch, out_channels=d_channels, kernel_size=1),
+			nn.GroupNorm(1, d_channels)
 		)
 
 	def _make_grid(self, h: int, w: int):
@@ -51,14 +50,14 @@ class RelPosEmbed2D(nn.Module):
 	def forward(self, h: int, w: int) -> torch.Tensor:
 		grid = self._make_grid(h, w).to(self.frequencies)
 
-		min_pixels = (2 ** torch.arange(self.num_frequencies))
-		useful_mask = (min_pixels <= min(h, w)).to(self.frequencies)
+		# min_pixels = (2 ** torch.arange(self.num_frequencies))
+		# useful_mask = (min_pixels <= min(h, w)).to(self.frequencies)
 
-		base = torch.sigmoid(self.decay).clamp(min=1e-6)
-		powers = torch.arange(self.num_frequencies).to(self.frequencies)
-		decays = base ** powers
+		# base = torch.sigmoid(self.decay).clamp(min=1e-6)
+		# powers = torch.arange(self.num_frequencies).to(self.frequencies)
+		# decays = base ** powers
 
-		weights = decays * useful_mask
+		# weights = decays * useful_mask
 
 		grid_unsq = grid.unsqueeze(-1)  # [2, h, w, 1]
 		freqs = self.frequencies.view(1, 1, 1, -1)  # [1, 1, 1, F]
@@ -66,9 +65,11 @@ class RelPosEmbed2D(nn.Module):
 
 		# sin/cos and multiply amplitude weights -> sin_feat/cos_feat [2, h, w, F]
 		# expand weights to broadcast: [1, 1, 1, F]
-		weights_view = weights.view(1, 1, 1, -1)
-		sin_feat = torch.sin(tproj) * weights_view
-		cos_feat = torch.cos(tproj) * weights_view
+		# weights_view = weights.view(1, 1, 1, -1)
+		# sin_feat = torch.sin(tproj) * weights_view
+		# cos_feat = torch.cos(tproj) * weights_view
+		sin_feat = torch.sin(tproj)
+		cos_feat = torch.cos(tproj)
 
 		# now rearrange into channel-first format expected by conv: [1, 4F, h, w]
 		# sin_feat shape [2, h, w, F] -> permute -> [2, F, h, w] -> reshape [2F, h, w]

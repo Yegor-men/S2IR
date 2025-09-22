@@ -3,11 +3,12 @@ from torch import nn
 
 
 class ImageFiLM(nn.Module):
-	def __init__(self, d_channels: int, time_cond_dim: int):
+	def __init__(self, d_channels: int, time_dim: int):
 		super().__init__()
 
 		self.film = nn.Sequential(
-			nn.Linear(in_features=time_cond_dim, out_features=4 * d_channels),
+			nn.LayerNorm(time_dim),
+			nn.Linear(in_features=time_dim, out_features=4 * d_channels),
 			nn.SiLU(),
 			nn.Linear(in_features=4 * d_channels, out_features=2 * d_channels),
 		)

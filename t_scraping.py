@@ -49,21 +49,21 @@ print(f"Cuda is available: {torch.cuda.is_available()}")
 
 model = SIIR(
 	c_channels=1,
-	d_channels=64,
-	time_freq=7,
+	d_channels=32,
+	time_freq=8,
 	pos_freq=5,
 	num_blocks=6,
-	num_heads=4,
+	num_heads=2,
 	text_cond_dim=10,
 	text_token_length=1,
 	cross_dropout=0.05,
 	axial_dropout=0.05,
-	ffn_dropout=0.1,
-).to(device)
+	ffn_dropout=0.2,
+)
 
 from save_load_model import load_checkpoint_into
 
-model = load_checkpoint_into(model, "models/02021_baseline.pt", "cuda")
+model = load_checkpoint_into(model, "models/foo_04534.pt", "cuda")
 model.to(device)
 model.eval()
 
@@ -73,13 +73,14 @@ from modules.corrupt_image import corrupt_image
 from tqdm import tqdm
 import numpy as np
 
-max_num = 100
+max_num = 500
 
 losses = []
 
 with torch.no_grad():
-	t_range = torch.linspace(0, 1, steps=max_num)
-	t_scrape_losses = []
+	t_range = torch.linspace(0, 1.0, steps=max_num)
+	t_scrape_mse_losses = []
+	t_scrape_snr_losses = []
 
 	for _, t in tqdm(enumerate(t_range), total=max_num):
 		image, label = next(iter(train_data))
@@ -97,23 +98,32 @@ with torch.no_grad():
 		text_cond = text_cond.to(device)
 		alpha_bar = alpha_bar.to(device)
 
-		predicted = model(noisy_image, text_cond, alpha_bar)
-		loss = nn.functional.mse_loss(predicted, expected_output)
-		t_scrape_losses.append(loss.item())
+		snr = alpha_bar / (1 - alpha_bar)
+		weight = (1 / (snr + 1e-6)).clamp_(max=100.0)
+		print(f"{t} = {torch.max(weight)}")
 
-x = np.linspace(0, 1, len(t_scrape_losses))
-plt.plot(x, t_scrape_losses)
-percentiles = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
-indices = [int(p / 100 * (len(t_scrape_losses) - 1)) for p in percentiles]
-percentile_x = [x[i] for i in indices]
-percentile_y = [t_scrape_losses[i] for i in indices]
-for px, py, p in zip(percentile_x, percentile_y, percentiles):
-	plt.scatter(px, py, color='red')
-	plt.text(px, py, f'{py}', fontsize=9, ha='center', va='bottom')
-plt.title('T scrape Losses')
+		predicted_noise = model(noisy_image, text_cond, alpha_bar)
+		mse_loss = nn.functional.mse_loss(predicted_noise, expected_output)
+		snr_loss = (weight * ((predicted_noise - expected_output) ** 2).mean(dim=[1, 2, 3])).mean()
+		t_scrape_mse_losses.append(mse_loss.item())
+		t_scrape_snr_losses.append(snr_loss.item())
 
-for i, v in enumerate(percentile_y):
-	print(f"t = {percentiles[i] / 100}, loss = {v:.6f}")
+# x = np.linspace(0, 1, len(t_scrape_losses))
+# plt.plot(x, t_scrape_losses)
+# percentiles = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
+# indices = [int(p / 100 * (len(t_scrape_losses) - 1)) for p in percentiles]
+# percentile_x = [x[i] for i in indices]
+# percentile_y = [t_scrape_losses[i] for i in indices]
+# for px, py, p in zip(percentile_x, percentile_y, percentiles):
+# 	plt.scatter(px, py, color='red')
+# 	plt.text(px, py, f'{py}', fontsize=9, ha='center', va='bottom')
+# plt.title('T scrape Losses')
+#
+# for i, v in enumerate(percentile_y):
+# 	print(f"t = {percentiles[i] / 100}, loss = {v:.6f}")
 
-plt.plot(losses)
+plt.plot(t_scrape_mse_losses, label="MSE")
+plt.plot(t_scrape_snr_losses, label="SNR")
+# plt.plot(losses)
+plt.legend()
 plt.show()
