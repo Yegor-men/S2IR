@@ -60,7 +60,7 @@ model = SIIR(
 
 # from save_load_model import load_checkpoint_into
 #
-# model = load_checkpoint_into(model, "models/foo.pt", "cuda")
+# model = load_checkpoint_into(model, "models/foo_ln_40.pt", "cuda")
 # model.to(device)
 # model.eval()
 
@@ -125,7 +125,7 @@ train_dloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 test_dloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True)
 
 peak_lr = 1e-3
-final_lr = 1e-4
+final_lr = 1e-5
 total_steps = num_epochs * len(train_dloader)
 warmup_steps = len(train_dloader)
 
@@ -172,8 +172,8 @@ for E in range(num_epochs):
 				text_cond = text_cond.to(device)
 				alpha_bar = alpha_bar.to(device)
 
-				snr = alpha_bar / (1 - alpha_bar)
-				weight = (1 / (snr + 1e-6)).clamp_(max=100.0)
+				weight = torch.log(1 + (1 - alpha_bar) / (alpha_bar + 1e-2))
+				weight /= weight.mean()
 
 			predicted_noise = model(noisy_image, text_cond, alpha_bar)
 			# loss = nn.functional.mse_loss(predicted_noise, expected_output)
@@ -216,8 +216,8 @@ for E in range(num_epochs):
 				text_cond = text_cond.to(device)
 				alpha_bar = alpha_bar.to(device)
 
-				snr = alpha_bar / (1 - alpha_bar)
-				weight = (1 / (snr + 1e-6)).clamp_(max=100.0)
+				weight = torch.log(1 + (1 - alpha_bar) / (alpha_bar + 1e-2))
+				weight /= weight.mean()
 
 				predicted_noise = ema_model(noisy_image, text_cond, alpha_bar)
 				# loss = nn.functional.mse_loss(predicted_noise, expected_output)
@@ -271,8 +271,8 @@ for E in range(num_epochs):
 				text_cond = text_cond.to(device)
 				alpha_bar = alpha_bar.to(device)
 
-				snr = alpha_bar / (1 - alpha_bar)
-				weight = (1 / (snr + 1e-6)).clamp_(max=100.0)
+				weight = torch.log(1 + (1 - alpha_bar) / (alpha_bar + 1e-2))
+				weight /= weight.mean()
 
 				predicted_noise = ema_model(noisy_image, text_cond, alpha_bar)
 				mse_loss = nn.functional.mse_loss(predicted_noise, expected_output)

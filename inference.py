@@ -4,7 +4,6 @@ from modules.alpha_bar import alpha_bar_cosine
 from modules.render_image import render_image
 
 B, C, H, W = 100, 1, 28, 28
-
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 from modules.s2ir import SIIR
@@ -25,7 +24,7 @@ model = SIIR(
 
 from save_load_model import load_checkpoint_into
 
-model = load_checkpoint_into(model, "models/bar.pt", "cuda")
+model = load_checkpoint_into(model, "models/foo_sqrt_20_039.pt", "cuda")
 model.to(device)
 model.eval()
 
