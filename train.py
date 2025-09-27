@@ -44,23 +44,29 @@ print(f"Cuda is available: {torch.cuda.is_available()}")
 from modules.s2ir import SIIR
 from modules.count_params import count_parameters
 
+# Col freq = 2c
+# Time freq = 2
+# Pos freq = 4
+
 model = SIIR(
 	c_channels=1,
-	d_channels=32,
-	time_freq=8,
-	pos_freq=5,
+	d_channels=64,
+	col_freq=9,
+	time_freq=7,
+	time_dim=32,
+	pos_freq=4,
 	num_blocks=6,
-	num_heads=2,
+	num_heads=1,
 	text_cond_dim=10,
 	text_token_length=1,
-	cross_dropout=0.05,
-	axial_dropout=0.05,
-	ffn_dropout=0.2,
+	cross_dropout=0.1,
+	axial_dropout=0.1,
+	ffn_dropout=0.1,
 ).to(device)
 
 # from save_load_model import load_checkpoint_into
 #
-# model = load_checkpoint_into(model, "models/foo_ln_40.pt", "cuda")
+# model = load_checkpoint_into(model, "models/temp.pt", "cuda")
 # model.to(device)
 # model.eval()
 
@@ -117,7 +123,7 @@ def bicubic_rescale(tensor, new_height, new_width):
 	)
 
 
-num_epochs = 20
+num_epochs = 40
 batch_size = 100
 ema_decay = 0.999
 
@@ -138,6 +144,7 @@ from tqdm import tqdm
 from modules.alpha_bar import alpha_bar_cosine
 from modules.corrupt_image import corrupt_image
 from modules.render_image import render_image
+from modules.run_ddim_visualization import run_ddim_visualization
 
 train_losses = []
 test_losses = []
@@ -172,12 +179,13 @@ for E in range(num_epochs):
 				text_cond = text_cond.to(device)
 				alpha_bar = alpha_bar.to(device)
 
-				weight = torch.log(1 + (1 - alpha_bar) / (alpha_bar + 1e-2))
-				weight /= weight.mean()
+			# weight = torch.log(1 + (1 - alpha_bar) / (alpha_bar + 1e-2))
+			# weight = torch.sin(torch.pi * alpha_bar) + 1e-2
+			# weight /= weight.mean()
 
 			predicted_noise = model(noisy_image, text_cond, alpha_bar)
-			# loss = nn.functional.mse_loss(predicted_noise, expected_output)
-			loss = (weight * ((predicted_noise - expected_output) ** 2).mean(dim=[1, 2, 3])).mean()
+			loss = nn.functional.mse_loss(predicted_noise, expected_output)
+			# loss = (weight * ((predicted_noise - expected_output) ** 2).mean(dim=[1, 2, 3])).mean()
 			batch_loss += (loss / len(scales)).item()
 			(loss / len(scales)).backward()
 
@@ -216,12 +224,13 @@ for E in range(num_epochs):
 				text_cond = text_cond.to(device)
 				alpha_bar = alpha_bar.to(device)
 
-				weight = torch.log(1 + (1 - alpha_bar) / (alpha_bar + 1e-2))
-				weight /= weight.mean()
+				# weight = torch.log(1 + (1 - alpha_bar) / (alpha_bar + 1e-2))
+				# weight = torch.sin(torch.pi * alpha_bar) + 1e-2
+				# weight /= weight.mean()
 
 				predicted_noise = ema_model(noisy_image, text_cond, alpha_bar)
-				# loss = nn.functional.mse_loss(predicted_noise, expected_output)
-				loss = (weight * ((predicted_noise - expected_output) ** 2).mean(dim=[1, 2, 3])).mean()
+				loss = nn.functional.mse_loss(predicted_noise, expected_output)
+				# loss = (weight * ((predicted_noise - expected_output) ** 2).mean(dim=[1, 2, 3])).mean()
 				batch_loss += (loss / len(scales)).item()
 
 				if i == 0:
@@ -271,21 +280,21 @@ for E in range(num_epochs):
 				text_cond = text_cond.to(device)
 				alpha_bar = alpha_bar.to(device)
 
-				weight = torch.log(1 + (1 - alpha_bar) / (alpha_bar + 1e-2))
-				weight /= weight.mean()
+				# weight = torch.log(1 + (1 - alpha_bar) / (alpha_bar + 1e-2))
+				# weight /= weight.mean()
 
 				predicted_noise = ema_model(noisy_image, text_cond, alpha_bar)
 				mse_loss = nn.functional.mse_loss(predicted_noise, expected_output)
-				snr_loss = (weight * ((predicted_noise - expected_output) ** 2).mean(dim=[1, 2, 3])).mean()
+				# snr_loss = (weight * ((predicted_noise - expected_output) ** 2).mean(dim=[1, 2, 3])).mean()
 				t_mse_loss += (mse_loss / len(scales)).item()
-				t_snr_loss += (snr_loss / len(scales)).item()
+			# t_snr_loss += (snr_loss / len(scales)).item()
 
 			t_scrape_mse_losses.append(t_mse_loss)
-			t_scrape_snr_losses.append(t_snr_loss)
+		# t_scrape_snr_losses.append(t_snr_loss)
 
 		x = np.linspace(0, 1, len(t_scrape_mse_losses))
 		plt.plot(x, t_scrape_mse_losses, label="MSE")
-		plt.plot(x, t_scrape_snr_losses, label="SNR")
+		# plt.plot(x, t_scrape_snr_losses, label="SNR")
 		percentiles = [1, 25, 50, 75, 99]
 		indices = [int(p / 100 * (len(t_scrape_mse_losses) - 1)) for p in percentiles]
 		percentile_x = [x[i] for i in indices]
@@ -303,6 +312,46 @@ for E in range(num_epochs):
 		plt.title("T scrape percentile losses over time")
 		plt.legend()
 		plt.show()
+
+	# RENDERING
+	with torch.no_grad():
+		positive_text_conditioning = torch.zeros(100, 10)
+		for i in range(10):
+			positive_text_conditioning[i * 10:(i + 1) * 10, i] = 1.0
+
+		small_noise = torch.randn(100, 1, 28, 28)
+		big_noise = torch.randn(100, 1, 100, 100)
+		zero_text_conditioning = torch.zeros_like(positive_text_conditioning).to(device)
+
+		final_x0_hat, final_x = run_ddim_visualization(
+			model=ema_model,
+			initial_noise=small_noise,
+			positive_text_conditioning=positive_text_conditioning,
+			zero_text_conditioning=zero_text_conditioning,
+			alpha_bar_fn=alpha_bar_cosine,
+			render_image_fn=render_image,
+			num_steps=50,
+			cfg_scale=1.0,  # safe
+			eta=1.0,
+			render_every=1,
+			start_t=0.999,  # explicit safe start
+			device=torch.device("cuda")
+		)
+
+		final_x0_hat, final_x = run_ddim_visualization(
+			model=ema_model,
+			initial_noise=big_noise,
+			positive_text_conditioning=positive_text_conditioning,
+			zero_text_conditioning=zero_text_conditioning,
+			alpha_bar_fn=alpha_bar_cosine,
+			render_image_fn=render_image,
+			num_steps=20,
+			cfg_scale=1.0,  # safe
+			eta=1.0,
+			render_every=1,
+			start_t=0.999,  # explicit safe start
+			device=torch.device("cuda")
+		)
 
 	# MODEL SAVING
 	if (E + 1) % 1 == 0 or E == num_epochs:
