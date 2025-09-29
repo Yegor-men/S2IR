@@ -7,7 +7,6 @@ def run_ddim_visualization(
 		model: torch.nn.Module,
 		initial_noise: torch.Tensor,
 		positive_text_conditioning: torch.Tensor,
-		zero_text_conditioning: torch.Tensor,
 		alpha_bar_fn,
 		render_image_fn=None,
 		num_steps: int = 50,
@@ -24,7 +23,6 @@ def run_ddim_visualization(
 	x = initial_noise.to(device)
 	B, C, H, W = x.shape
 	cond = positive_text_conditioning.to(device)
-	uncond = zero_text_conditioning.to(device)
 
 	# safe default for start_t:
 	if start_t is None:
@@ -53,8 +51,8 @@ def run_ddim_visualization(
 		a_s = alpha_bar_fn(s_batch).to(device).clamp(min=eps_small)
 
 		# model outputs (classifier-free guidance: uncond + cond)
-		eps_uncond = model(x, uncond, a_t)  # shape [B,C,H,W]
-		eps_cond = model(x, cond, a_t)
+		eps_uncond, eps_cond, _ = model(x, a_t, positive_text_conditioning)
+		
 		eps_hat = eps_uncond + cfg_scale * (eps_cond - eps_uncond)
 
 		# compute x0_hat stably

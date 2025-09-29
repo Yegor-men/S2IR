@@ -22,13 +22,13 @@ class RelPosEmbed2D(nn.Module):
 
 		in_ch = 4 * self.num_frequencies
 
-		# self.decay = nn.Parameter(torch.zeros(1))
+	# self.decay = nn.Parameter(torch.zeros(1))
 
-		self.proj = nn.Sequential(
-			nn.GroupNorm(1, in_ch),
-			nn.Conv2d(in_channels=in_ch, out_channels=d_channels, kernel_size=1),
-			nn.GroupNorm(1, d_channels)
-		)
+	# self.proj = nn.Sequential(
+	# 	nn.GroupNorm(1, in_ch),
+	# 	nn.Conv2d(in_channels=in_ch, out_channels=d_channels, kernel_size=1),
+	# 	nn.GroupNorm(1, d_channels)
+	# )
 
 	def _make_grid(self, h: int, w: int):
 		if w >= h:
@@ -75,8 +75,9 @@ class RelPosEmbed2D(nn.Module):
 		# sin_feat shape [2, h, w, F] -> permute -> [2, F, h, w] -> reshape [2F, h, w]
 		sin_ch = sin_feat.permute(0, 3, 1, 2).contiguous().view(2 * self.num_frequencies, h, w)
 		cos_ch = cos_feat.permute(0, 3, 1, 2).contiguous().view(2 * self.num_frequencies, h, w)
-		fourier_ch = torch.cat([sin_ch, cos_ch], dim=0).unsqueeze(0)  # [1, 4F, h, w]
+		fourier_ch = torch.cat([sin_ch, cos_ch], dim=0)  # [1, 4F, h, w]
 
-		out = self.proj(fourier_ch)  # [1, pos_dim, h, w]
-		out = out.squeeze(0)  # -> [pos_dim, h, w]
-		return out
+		# .unsqueeze(0)
+		# out = self.proj(fourier_ch)  # [1, pos_dim, h, w]
+		# out = out.squeeze(0)  # -> [pos_dim, h, w]
+		return fourier_ch
