@@ -58,14 +58,14 @@ model = SIIR(
 	cross_dropout=0.1,
 	axial_dropout=0.1,
 	ffn_dropout=0.2,
+	pr_block_dropout=0.1,
 ).to(device)
 
-from save_load_model import load_checkpoint_into
-
-model = load_checkpoint_into(model, "models/enc_dec_model_foo.pt", "cuda")
-model.to(device)
-model.eval()
-
+# from save_load_model import load_checkpoint_into
+#
+# model = load_checkpoint_into(model, "models/enc_dec_model_foo.pt", "cuda")
+# model.to(device)
+# model.eval()
 import copy
 
 ema_model = copy.deepcopy(model)
@@ -119,15 +119,15 @@ def bicubic_rescale(tensor, new_height, new_width):
 	)
 
 
-num_epochs = 40
+num_epochs = 20
 batch_size = 50
 ema_decay = 0.999
 
 train_dloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 test_dloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True)
 
-peak_lr = 1e-5
-final_lr = 1e-6
+peak_lr = 1e-3
+final_lr = 1e-5
 total_steps = num_epochs * len(train_dloader)
 warmup_steps = len(train_dloader)
 
@@ -146,7 +146,7 @@ train_losses = []
 test_losses = []
 percentile_losses = []
 
-scales = [28]
+# scale = 14
 
 for E in range(num_epochs):
 
@@ -286,7 +286,8 @@ for E in range(num_epochs):
 		for i in range(10):
 			positive_text_conditioning[i * 10:(i + 1) * 10, i] = 1.0
 
-		small_noise = torch.randn(100, 1, 28, 28).to(device)
+		small_noise = torch.randn(100, 1, 14, 14).to(device)
+		medium_noise = torch.randn(100, 1, 28, 28).to(device)
 		big_noise = torch.randn(100, 1, 100, 100).to(device)
 
 		final_x0_hat, final_x = run_ddim_visualization(
@@ -296,10 +297,22 @@ for E in range(num_epochs):
 			alpha_bar_fn=alpha_bar_cosine,
 			render_image_fn=render_image,
 			num_steps=50,
-			cfg_scale=1.0,  # safe
+			cfg_scale=1.0,
 			eta=1.0,
-			render_every=1,
-			start_t=0.999,  # explicit safe start
+			render_every=1000,
+			device=torch.device("cuda")
+		)
+
+		final_x0_hat, final_x = run_ddim_visualization(
+			model=ema_model,
+			initial_noise=medium_noise,
+			positive_text_conditioning=positive_text_conditioning,
+			alpha_bar_fn=alpha_bar_cosine,
+			render_image_fn=render_image,
+			num_steps=50,
+			cfg_scale=1.0,
+			eta=1.0,
+			render_every=1000,
 			device=torch.device("cuda")
 		)
 
@@ -310,10 +323,9 @@ for E in range(num_epochs):
 			alpha_bar_fn=alpha_bar_cosine,
 			render_image_fn=render_image,
 			num_steps=20,
-			cfg_scale=1.0,  # safe
+			cfg_scale=1.0,
 			eta=1.0,
-			render_every=1,
-			start_t=0.999,  # explicit safe start
+			render_every=1000,
 			device=torch.device("cuda")
 		)
 

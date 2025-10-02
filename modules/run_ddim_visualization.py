@@ -13,7 +13,6 @@ def run_ddim_visualization(
 		cfg_scale: float = 1.0,  # conservative default for debugging
 		eta: float = 0.0,
 		render_every: int = 1,
-		start_t: float | None = None,  # if None choose safe default below
 		device: Optional[torch.device] = None,
 ):
 	device = device or initial_noise.device
@@ -22,16 +21,10 @@ def run_ddim_visualization(
 
 	x = initial_noise.to(device)
 	B, C, H, W = x.shape
-	cond = positive_text_conditioning.to(device)
-
-	# safe default for start_t:
-	if start_t is None:
-		# default: prefer at least 0.9; but also allow num_steps/(num_steps+1) if > 0.9
-		start_guess = float(num_steps) / float(num_steps + 1)
-		start_t = max(0.9, start_guess)
+	# cond = positive_text_conditioning.to(device)
 
 	# create timesteps descending from start_t -> 0 with num_steps+1 points
-	ts = torch.linspace(start_t, 0.0, steps=(num_steps + 1), device=device)
+	ts = torch.linspace(1.0, 0.0, steps=(num_steps + 1), device=device)
 
 	eps_small = 1e-6
 
@@ -52,7 +45,7 @@ def run_ddim_visualization(
 
 		# model outputs (classifier-free guidance: uncond + cond)
 		eps_uncond, eps_cond, _ = model(x, a_t, positive_text_conditioning)
-		
+
 		eps_hat = eps_uncond + cfg_scale * (eps_cond - eps_uncond)
 
 		# compute x0_hat stably
@@ -62,16 +55,8 @@ def run_ddim_visualization(
 		x0_hat = (x - sqrt_1_a_t * eps_hat) / (sqrt_a_t + eps_small)
 
 		# render reconstruction
-		# if (i % render_every == 0) and (render_image_fn is not None):
-		# 	render_image_fn(torch.clamp((x0_hat + 1.0) / 2.0, 0.0, 1.0))
-
-		# debug prints for first few steps
-		# if i < 4:
-		# 	print(f"step {i}: t={t_val:.6f} -> s={s_val:.6f}")
-		# 	print(f"  a_t mean {a_t.mean().item():.3e}  min {a_t.min().item():.3e}")
-		# 	print(f"  eps_hat mean {eps_hat.mean().item():.3f}  std {eps_hat.std().item():.3f}")
-		# 	print(f"  x min/max {x.min().item():.3f}/{x.max().item():.3f}"
-		# 		  f"  x0_hat min/max {x0_hat.min().item():.3f}/{x0_hat.max().item():.3f}")
+		if ((i + 1) % render_every == 0) and (render_image_fn is not None):
+			render_image_fn(torch.clamp((x0_hat + 1.0) / 2.0, 0.0, 1.0))
 
 		# direction and ancestral sigma
 		eps_dir = (x - sqrt_a_t * x0_hat) / (sqrt_1_a_t + eps_small)

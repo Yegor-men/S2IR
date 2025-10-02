@@ -13,12 +13,16 @@ class CrossAttention(nn.Module):
 		super().__init__()
 		assert d_channels % num_heads == 0
 
+		self.d_channels = d_channels
+
 		self.mha = nn.MultiheadAttention(
 			embed_dim=d_channels,
 			num_heads=num_heads,
 			batch_first=True,
 			dropout=dropout,
 		)
+
+		self.scalar = nn.Parameter(torch.ones(d_channels))
 
 	def forward(self, image, text_tokens):
 		b, d, h, w = image.shape
@@ -32,4 +36,6 @@ class CrossAttention(nn.Module):
 		# reshape back to image grid [B, D, H, W]
 		attn_out = attn_out.view(b, h, w, d).permute(0, 3, 1, 2).contiguous()  # [B, D, H, W]
 
-		return attn_out
+		scalar = self.scalar.view(1, self.d_channels, 1, 1)
+
+		return attn_out * scalar
