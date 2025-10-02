@@ -1,6 +1,6 @@
-# S2IR
+# S2ID
 
-Scale Invariant Image Refiner
+Scale Invariant Image Diffuser
 
 Primarily uses relative positional coordinates (fourier series) added to the pixel "tokens". Then uses axial attention
 and text conditioning with an FFN in style of text transformer blocks, but adapted for images. Trained to predict
